@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"github.com/libp2p/go-libp2p-core/discovery"
 	"time"
 
 	cid "github.com/ipfs/go-cid"
@@ -30,12 +31,12 @@ func (d *RoutingDiscovery) Advertise(ctx context.Context, ns string, opts ...Opt
 	}
 
 	ttl := options.Ttl
-	log.Infof("discovery::Advertise-exec: ns = %s , ttl = %v", ns, ttl)
 	if ttl == 0 || ttl > 3*time.Hour {
 		// the DHT provider record validity is 24hrs, but it is recommnded to republish at least every 6hrs
 		// we go one step further and republish every 3hrs
 		ttl = 3 * time.Hour
 	}
+
 	cid, err := nsToCid(ns)
 	if err != nil {
 		return 0, err
@@ -82,4 +83,31 @@ func nsToCid(ns string) (cid.Cid, error) {
 	}
 
 	return cid.NewCidV1(cid.Raw, h), nil
+}
+
+func NewDiscoveryRouting(disc discovery.Discovery, opts ...discovery.Option) *DiscoveryRouting {
+	return &DiscoveryRouting{disc, opts}
+}
+
+type DiscoveryRouting struct {
+	discovery.Discovery
+	opts []discovery.Option
+}
+
+func (r *DiscoveryRouting) Provide(ctx context.Context, c cid.Cid, bcast bool) error {
+	if !bcast {
+		return nil
+	}
+
+	_, err := r.Advertise(ctx, cidToNs(c), r.opts...)
+	return err
+}
+
+func (r *DiscoveryRouting) FindProvidersAsync(ctx context.Context, c cid.Cid, limit int) <-chan peer.AddrInfo {
+	ch, _ := r.FindPeers(ctx, cidToNs(c), append([]discovery.Option{discovery.Limit(limit)}, r.opts...)...)
+	return ch
+}
+
+func cidToNs(c cid.Cid) string {
+	return "/provider/" + c.String()
 }

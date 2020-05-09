@@ -4,9 +4,11 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
-	cid "github.com/ipfs/go-cid"
+	"github.com/ipfs/go-cid"
 	bhost "github.com/libp2p/go-libp2p-blankhost"
+	"github.com/libp2p/go-libp2p-core/discovery"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
@@ -100,5 +102,45 @@ func TestRoutingDiscovery(t *testing.T) {
 	pi := pis[0]
 	if pi.ID != h1.ID() {
 		t.Fatalf("Unexpected peer: %s", pi.ID)
+	}
+}
+
+func TestDiscoveryRouting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h1 := bhost.NewBlankHost(swarmt.GenSwarm(t, ctx))
+	h2 := bhost.NewBlankHost(swarmt.GenSwarm(t, ctx))
+
+	dserver := newDiscoveryServer()
+	d1 := &mockDiscoveryClient{h1, dserver}
+	d2 := &mockDiscoveryClient{h2, dserver}
+
+	r1 := NewDiscoveryRouting(d1, discovery.TTL(time.Hour))
+	r2 := NewDiscoveryRouting(d2, discovery.TTL(time.Hour))
+
+	c, err := nsToCid("/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r1.Provide(ctx, c, true); err != nil {
+		t.Fatal(err)
+	}
+
+	pch := r2.FindProvidersAsync(ctx, c, 20)
+
+	var allAIs []peer.AddrInfo
+	for ai := range pch {
+		allAIs = append(allAIs, ai)
+	}
+
+	if len(allAIs) != 1 {
+		t.Fatalf("Expected 1 peer, got %d", len(allAIs))
+	}
+
+	ai := allAIs[0]
+	if ai.ID != h1.ID() {
+		t.Fatalf("Unexpected peer: %s", ai.ID)
 	}
 }
